@@ -49,3 +49,7 @@ def group_top_result_per_video(results: list[SearchResult]) -> list[SearchResult
         if current is None or result.similarity > current.similarity:
             best_by_video[video_id] = result
     return sorted(best_by_video.values(), key=lambda item: item.similarity, reverse=True)
+
+
+def filter_results_by_similarity(results: list[SearchResult], min_similarity: float) -> list[SearchResult]:
+    return [result for result in results if result.similarity >= min_similarity]

@@ -11,6 +11,7 @@ VideoSense is a Python app for semantic video search.
 - Optional persistent index storage with ChromaDB.
 - Reuse previously indexed videos via content-based identity.
 - See best match per video for broad library queries.
+- Filter weak matches with a configurable minimum similarity threshold.
 
 ## Local setup
 

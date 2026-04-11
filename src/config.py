@@ -17,6 +17,7 @@ class AppConfig:
     embed_backoff_sec: float
     enable_persistence: bool
     persistence_dir: str
+    min_similarity: float
 
     @classmethod
     def from_env(cls) -> 'AppConfig':
@@ -32,4 +33,5 @@ class AppConfig:
             embed_backoff_sec=float(os.getenv('VIDEOSENSE_EMBED_BACKOFF_SEC', '1.0')),
             enable_persistence=os.getenv('VIDEOSENSE_ENABLE_PERSISTENCE', 'false').strip().lower() in {'1', 'true', 'yes'},
             persistence_dir=os.getenv('VIDEOSENSE_PERSISTENCE_DIR', '.videosense/chroma').strip(),
+            min_similarity=float(os.getenv('VIDEOSENSE_MIN_SIMILARITY', '0.3')),
         )
