@@ -12,24 +12,34 @@ async def embed_frames_with_retry(
     concurrency: int,
     max_retries: int,
     base_backoff_sec: float,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> tuple[list[FrameRecord], list[str]]:
     semaphore = asyncio.Semaphore(max(1, concurrency))
     failures: list[str] = []
+    total = len(frames)
+    done = 0
+    lock = asyncio.Lock()
 
     async def _embed_one(frame: FrameRecord) -> None:
+        nonlocal done
         async with semaphore:
             for attempt in range(max_retries + 1):
                 try:
                     frame.embedding = await embed_image_fn(frame.thumbnail_b64)
-                    return
+                    break
                 except Exception:
                     if attempt >= max_retries:
                         failures.append(frame.frame_id)
                         frame.embedding = None
-                        return
+                        break
                     wait_for = base_backoff_sec * (2**attempt)
                     if wait_for > 0:
                         await asyncio.sleep(wait_for)
+
+            async with lock:
+                done += 1
+                if on_progress:
+                    on_progress(done, total)
 
     await asyncio.gather(*[_embed_one(frame) for frame in frames])
     return frames, failures
