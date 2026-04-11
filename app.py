@@ -12,7 +12,11 @@ from src.embeddings import GeminiEmbedder
 from src.index_store import ChromaIndexStore, HybridIndexStore, InMemoryIndexStore
 from src.pipeline import index_frames_into_store, search_frames
 from src.search import format_timestamp
-from src.video_processing import compute_video_id, extract_sampled_frames, persist_uploaded_video
+from src.video_processing import (
+    compute_video_id_from_bytes,
+    extract_sampled_frames,
+    persist_uploaded_video,
+)
 
 
 def _get_runtime() -> tuple[AppConfig, GeminiEmbedder, HybridIndexStore]:
@@ -83,8 +87,9 @@ def main() -> None:
     if uploaded is not None:
         if st.button('Index video', type='primary'):
             temp_root = Path(tempfile.gettempdir()) / 'videosense_uploads'
+            video_bytes = bytes(uploaded.getbuffer())
             video_path = persist_uploaded_video(uploaded_file=uploaded, base_dir=temp_root)
-            video_id = compute_video_id(str(video_path))
+            video_id = compute_video_id_from_bytes(video_bytes)
 
             st.session_state['active_video_path'] = str(video_path)
             st.session_state['active_video_id'] = video_id

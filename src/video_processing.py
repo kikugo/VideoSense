@@ -44,6 +44,10 @@ def compute_video_id(video_path: str) -> str:
     return hashlib.sha1(normalized.encode('utf-8')).hexdigest()
 
 
+def compute_video_id_from_bytes(video_bytes: bytes) -> str:
+    return hashlib.sha1(video_bytes).hexdigest()
+
+
 def extract_sampled_frames(video_path: str, video_id: str, interval_sec: float) -> list[FrameRecord]:
     capture = cv2.VideoCapture(video_path)
     if not capture.isOpened():
