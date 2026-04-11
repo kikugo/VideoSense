@@ -11,7 +11,11 @@ from src.config import AppConfig
 from src.embeddings import GeminiEmbedder
 from src.index_store import ChromaIndexStore, HybridIndexStore, InMemoryIndexStore
 from src.pipeline import index_frames_into_store, search_frames
-from src.search import format_timestamp, group_top_result_per_video
+from src.search import (
+    filter_results_by_similarity,
+    format_timestamp,
+    group_top_result_per_video,
+)
 from src.video_processing import (
     compute_video_id_from_bytes,
     extract_sampled_frames,
@@ -41,11 +45,14 @@ def _ensure_session_defaults() -> None:
     st.session_state.setdefault('active_video_id', None)
     st.session_state.setdefault('active_video_name', None)
     st.session_state.setdefault('video_name_by_id', {})
+    st.session_state.setdefault('video_path_by_id', {})
     st.session_state.setdefault('search_results', [])
     st.session_state.setdefault('last_index_failures', [])
+    st.session_state.setdefault('playback_video_id', None)
+    st.session_state.setdefault('playback_start_time', 0)
 
 
-def _render_results(video_bytes: bytes) -> None:
+def _render_results() -> None:
     results = st.session_state.get('search_results', [])
     if not results:
         return
@@ -63,14 +70,9 @@ def _render_results(video_bytes: bytes) -> None:
             names = st.session_state.get('video_name_by_id', {})
             source = names.get(result.frame.video_id, result.frame.video_id[:8])
             st.caption(f"source: {source}")
-
-    selected = st.selectbox(
-        'Play from match',
-        options=list(range(len(results))),
-        format_func=lambda i: f"{i + 1}. {format_timestamp(results[i].frame.timestamp_sec)}",
-    )
-    start_time = int(results[selected].frame.timestamp_sec)
-    st.video(video_bytes, start_time=start_time)
+            if st.button('Play', key=f"play_{result.frame.video_id}_{result.frame.frame_id}"):
+                st.session_state['playback_video_id'] = result.frame.video_id
+                st.session_state['playback_start_time'] = int(result.frame.timestamp_sec)
 
 
 def main() -> None:
@@ -105,6 +107,9 @@ def main() -> None:
                 st.session_state['active_video_id'] = video_id
                 st.session_state['active_video_name'] = uploaded.name
                 st.session_state['video_name_by_id'][video_id] = uploaded.name
+                st.session_state['video_path_by_id'][video_id] = str(video_path)
+                st.session_state['playback_video_id'] = video_id
+                st.session_state['playback_start_time'] = 0
 
                 cached = store.load(video_id)
                 if cached:
@@ -141,9 +146,12 @@ def main() -> None:
                 if failures:
                     st.warning(f'{uploaded.name}: failed frames {len(failures)}')
 
-        if st.session_state.get('active_video_path'):
-            video_bytes = Path(st.session_state['active_video_path']).read_bytes()
-            st.video(video_bytes)
+        playback_video_id = st.session_state.get('playback_video_id')
+        video_path_by_id = st.session_state.get('video_path_by_id', {})
+        if playback_video_id and playback_video_id in video_path_by_id:
+            playback_path = video_path_by_id[playback_video_id]
+            video_bytes = Path(playback_path).read_bytes()
+            st.video(video_bytes, start_time=int(st.session_state.get('playback_start_time', 0)))
 
             query = st.text_input('Search for a moment')
             if st.button('Search') and query.strip():
@@ -155,9 +163,10 @@ def main() -> None:
                         top_k=config.top_k,
                     )
                 )
-                st.session_state['search_results'] = results
+                filtered = filter_results_by_similarity(results, min_similarity=config.min_similarity)
+                st.session_state['search_results'] = filtered
 
-                grouped = group_top_result_per_video(results)
+                grouped = group_top_result_per_video(filtered)
                 if grouped:
                     st.subheader('Best Match Per Video')
                     for item in grouped:
@@ -166,8 +175,11 @@ def main() -> None:
                         st.write(
                             f"{label}: {format_timestamp(item.frame.timestamp_sec)} ({round(item.similarity * 100)}%)"
                         )
-
-            _render_results(video_bytes=video_bytes)
+                else:
+                    st.info(
+                        f'No strong matches found at the current similarity threshold ({config.min_similarity:.2f}).'
+                    )
+            _render_results()
 
 
 if __name__ == '__main__':
