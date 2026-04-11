@@ -39,3 +39,13 @@ def format_timestamp(seconds: float) -> str:
     minutes = seconds_int // 60
     remainder = seconds_int % 60
     return f'{minutes}:{remainder:02d}'
+
+
+def group_top_result_per_video(results: list[SearchResult]) -> list[SearchResult]:
+    best_by_video: dict[str, SearchResult] = {}
+    for result in results:
+        video_id = result.frame.video_id
+        current = best_by_video.get(video_id)
+        if current is None or result.similarity > current.similarity:
+            best_by_video[video_id] = result
+    return sorted(best_by_video.values(), key=lambda item: item.similarity, reverse=True)

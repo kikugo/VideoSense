@@ -11,7 +11,7 @@ from src.config import AppConfig
 from src.embeddings import GeminiEmbedder
 from src.index_store import ChromaIndexStore, HybridIndexStore, InMemoryIndexStore
 from src.pipeline import index_frames_into_store, search_frames
-from src.search import format_timestamp
+from src.search import format_timestamp, group_top_result_per_video
 from src.video_processing import (
     compute_video_id_from_bytes,
     extract_sampled_frames,
@@ -40,6 +40,7 @@ def _ensure_session_defaults() -> None:
     st.session_state.setdefault('active_video_path', None)
     st.session_state.setdefault('active_video_id', None)
     st.session_state.setdefault('active_video_name', None)
+    st.session_state.setdefault('video_name_by_id', {})
     st.session_state.setdefault('search_results', [])
     st.session_state.setdefault('last_index_failures', [])
 
@@ -58,6 +59,10 @@ def _render_results(video_bytes: bytes) -> None:
             st.caption(
                 f"{format_timestamp(result.frame.timestamp_sec)} - {round(result.similarity * 100)}%"
             )
+
+            names = st.session_state.get('video_name_by_id', {})
+            source = names.get(result.frame.video_id, result.frame.video_id[:8])
+            st.caption(f"source: {source}")
 
     selected = st.selectbox(
         'Play from match',
@@ -82,35 +87,42 @@ def main() -> None:
         st.info('Set GEMINI_API_KEY in your local environment or .env file, then restart the app.')
         return
 
-    uploaded = st.file_uploader('Upload a video', type=['mp4', 'mov', 'avi', 'mkv', 'webm'])
+    uploaded_files = st.file_uploader(
+        'Upload one or more videos',
+        type=['mp4', 'mov', 'avi', 'mkv', 'webm'],
+        accept_multiple_files=True,
+    )
 
-    if uploaded is not None:
-        if st.button('Index video', type='primary'):
+    if uploaded_files:
+        if st.button('Index videos', type='primary'):
             temp_root = Path(tempfile.gettempdir()) / 'videosense_uploads'
-            video_bytes = bytes(uploaded.getbuffer())
-            video_path = persist_uploaded_video(uploaded_file=uploaded, base_dir=temp_root)
-            video_id = compute_video_id_from_bytes(video_bytes)
+            for uploaded in uploaded_files:
+                video_bytes = bytes(uploaded.getbuffer())
+                video_path = persist_uploaded_video(uploaded_file=uploaded, base_dir=temp_root)
+                video_id = compute_video_id_from_bytes(video_bytes)
 
-            st.session_state['active_video_path'] = str(video_path)
-            st.session_state['active_video_id'] = video_id
-            st.session_state['active_video_name'] = uploaded.name
+                st.session_state['active_video_path'] = str(video_path)
+                st.session_state['active_video_id'] = video_id
+                st.session_state['active_video_name'] = uploaded.name
+                st.session_state['video_name_by_id'][video_id] = uploaded.name
 
-            cached = store.load(video_id)
-            if cached:
-                st.success(f'Loaded existing index for {uploaded.name}.')
-            else:
-                with st.spinner('Extracting frames...'):
+                cached = store.load(video_id)
+                if cached:
+                    st.info(f'Reused index for {uploaded.name}.')
+                    continue
+
+                with st.spinner(f'Extracting frames from {uploaded.name}...'):
                     frames = extract_sampled_frames(
                         video_path=str(video_path),
                         video_id=video_id,
                         interval_sec=config.frame_interval_sec,
                     )
 
-                progress = st.progress(0.0, text='Indexing frames...')
+                progress = st.progress(0.0, text=f'Indexing {uploaded.name}...')
 
                 def _on_progress(done: int, total: int) -> None:
                     ratio = done / max(1, total)
-                    progress.progress(ratio, text=f'Indexing frames... {done}/{total}')
+                    progress.progress(ratio, text=f'Indexing {uploaded.name}... {done}/{total}')
 
                 indexed, failures = asyncio.run(
                     index_frames_into_store(
@@ -125,9 +137,9 @@ def main() -> None:
                     )
                 )
                 st.session_state['last_index_failures'] = failures
-                st.success(f'Indexed {len(indexed) - len(failures)} frame(s).')
+                st.success(f'{uploaded.name}: indexed {len(indexed) - len(failures)} frame(s).')
                 if failures:
-                    st.warning(f'Failed frames: {len(failures)}')
+                    st.warning(f'{uploaded.name}: failed frames {len(failures)}')
 
         if st.session_state.get('active_video_path'):
             video_bytes = Path(st.session_state['active_video_path']).read_bytes()
@@ -144,6 +156,16 @@ def main() -> None:
                     )
                 )
                 st.session_state['search_results'] = results
+
+                grouped = group_top_result_per_video(results)
+                if grouped:
+                    st.subheader('Best Match Per Video')
+                    for item in grouped:
+                        names = st.session_state.get('video_name_by_id', {})
+                        label = names.get(item.frame.video_id, item.frame.video_id[:8])
+                        st.write(
+                            f"{label}: {format_timestamp(item.frame.timestamp_sec)} ({round(item.similarity * 100)}%)"
+                        )
 
             _render_results(video_bytes=video_bytes)
 

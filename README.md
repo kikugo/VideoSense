@@ -4,11 +4,13 @@ VideoSense is a Python app for semantic video search.
 
 ## Features
 
-- Upload a video and index sampled frames.
+- Upload one or many videos and index sampled frames.
 - Generate image and text embeddings with Gemini.
 - Search moments with natural language.
 - Jump to matching timestamps in the video player.
 - Optional persistent index storage with ChromaDB.
+- Reuse previously indexed videos via content-based identity.
+- See best match per video for broad library queries.
 
 ## Local setup
 
