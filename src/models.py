@@ -27,6 +27,16 @@ class FrameRecord:
 
 
 @dataclass
+class TranscriptChunk:
+    video_id: str
+    chunk_id: str
+    start_sec: float
+    end_sec: float
+    text: str
+    embedding: Optional[list[float]] = None
+
+
+@dataclass
 class SearchResult:
     frame: FrameRecord
     similarity: float
