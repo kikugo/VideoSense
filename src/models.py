@@ -40,3 +40,9 @@ class TranscriptChunk:
 class SearchResult:
     frame: FrameRecord
     similarity: float
+
+
+@dataclass
+class TranscriptSearchResult:
+    chunk: TranscriptChunk
+    similarity: float
