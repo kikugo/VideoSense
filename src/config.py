@@ -18,6 +18,9 @@ class AppConfig:
     enable_persistence: bool
     persistence_dir: str
     min_similarity: float
+    frame_strategy: str
+    scene_threshold: float
+    max_visual_frames: int
 
     @classmethod
     def from_env(cls) -> 'AppConfig':
@@ -34,4 +37,7 @@ class AppConfig:
             enable_persistence=os.getenv('VIDEOSENSE_ENABLE_PERSISTENCE', 'false').strip().lower() in {'1', 'true', 'yes'},
             persistence_dir=os.getenv('VIDEOSENSE_PERSISTENCE_DIR', '.videosense/chroma').strip(),
             min_similarity=float(os.getenv('VIDEOSENSE_MIN_SIMILARITY', '0.3')),
+            frame_strategy=os.getenv('VIDEOSENSE_FRAME_STRATEGY', 'scene').strip(),
+            scene_threshold=float(os.getenv('VIDEOSENSE_SCENE_THRESHOLD', '27.0')),
+            max_visual_frames=int(os.getenv('VIDEOSENSE_MAX_VISUAL_FRAMES', '300')),
         )

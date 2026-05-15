@@ -5,3 +5,5 @@ google-genai
 chromadb
 python-dotenv
 pytest
+scenedetect
+faster-whisper
