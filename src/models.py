@@ -46,3 +46,14 @@ class SearchResult:
 class TranscriptSearchResult:
     chunk: TranscriptChunk
     similarity: float
+
+
+@dataclass
+class UnifiedSearchResult:
+    video_id: str
+    start_sec: float
+    end_sec: float
+    score: float
+    channel: str
+    frame: Optional[FrameRecord] = None
+    transcript: Optional[TranscriptChunk] = None

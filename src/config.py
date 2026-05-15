@@ -21,6 +21,10 @@ class AppConfig:
     frame_strategy: str
     scene_threshold: float
     max_visual_frames: int
+    enable_query_expansion: bool
+    rrf_k: int
+    transcript_weight: float
+    visual_weight: float
 
     @classmethod
     def from_env(cls) -> 'AppConfig':
@@ -40,4 +44,8 @@ class AppConfig:
             frame_strategy=os.getenv('VIDEOSENSE_FRAME_STRATEGY', 'scene').strip(),
             scene_threshold=float(os.getenv('VIDEOSENSE_SCENE_THRESHOLD', '27.0')),
             max_visual_frames=int(os.getenv('VIDEOSENSE_MAX_VISUAL_FRAMES', '300')),
+            enable_query_expansion=os.getenv('VIDEOSENSE_ENABLE_QUERY_EXPANSION', 'true').strip().lower() in {'1', 'true', 'yes'},
+            rrf_k=int(os.getenv('VIDEOSENSE_RRF_K', '60')),
+            transcript_weight=float(os.getenv('VIDEOSENSE_TRANSCRIPT_WEIGHT', '1.15')),
+            visual_weight=float(os.getenv('VIDEOSENSE_VISUAL_WEIGHT', '1.0')),
         )

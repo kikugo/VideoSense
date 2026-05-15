@@ -11,6 +11,10 @@ def test_app_config_reads_env_values(monkeypatch):
     monkeypatch.setenv('VIDEOSENSE_FRAME_STRATEGY', 'interval')
     monkeypatch.setenv('VIDEOSENSE_SCENE_THRESHOLD', '30.0')
     monkeypatch.setenv('VIDEOSENSE_MAX_VISUAL_FRAMES', '20')
+    monkeypatch.setenv('VIDEOSENSE_ENABLE_QUERY_EXPANSION', 'false')
+    monkeypatch.setenv('VIDEOSENSE_RRF_K', '70')
+    monkeypatch.setenv('VIDEOSENSE_TRANSCRIPT_WEIGHT', '1.4')
+    monkeypatch.setenv('VIDEOSENSE_VISUAL_WEIGHT', '0.9')
 
     config = AppConfig.from_env()
 
@@ -23,6 +27,10 @@ def test_app_config_reads_env_values(monkeypatch):
     assert config.frame_strategy == 'interval'
     assert config.scene_threshold == 30.0
     assert config.max_visual_frames == 20
+    assert config.enable_query_expansion is False
+    assert config.rrf_k == 70
+    assert config.transcript_weight == 1.4
+    assert config.visual_weight == 0.9
 
 
 def test_app_config_defaults_without_env(monkeypatch):
@@ -41,3 +49,7 @@ def test_app_config_defaults_without_env(monkeypatch):
     assert config.frame_strategy == 'scene'
     assert config.scene_threshold == 27.0
     assert config.max_visual_frames == 300
+    assert config.enable_query_expansion is True
+    assert config.rrf_k == 60
+    assert config.transcript_weight == 1.15
+    assert config.visual_weight == 1.0

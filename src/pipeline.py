@@ -4,7 +4,8 @@ import numpy as np
 
 from src.embeddings import embed_frames_with_retry
 from src.index_store import IndexStore
-from src.models import FrameRecord, SearchResult
+from src.models import FrameRecord, SearchResult, TranscriptChunk, UnifiedSearchResult
+from src.retrieval import fuse_ranked_results
 from src.search import rank_results
 
 
@@ -32,5 +33,28 @@ async def index_frames_into_store(
 
 async def search_frames(query: str, store: IndexStore, embed_text_fn, top_k: int) -> list[SearchResult]:
     query_vector = np.array(await embed_text_fn(query), dtype=float)
-    frames = store.load_all()
-    return rank_results(query_vector, frames, top_k=top_k)
+    return store.query_visual(query_vector, top_k=top_k)
+
+
+async def embed_transcripts_into_store(
+    video_id: str,
+    chunks: list[TranscriptChunk],
+    store: IndexStore,
+    embed_text_fn,
+) -> list[TranscriptChunk]:
+    for chunk in chunks:
+        chunk.embedding = await embed_text_fn(chunk.text)
+    store.save_transcripts(video_id, chunks)
+    return chunks
+
+
+async def search_library(query: str, store: IndexStore, embed_text_fn, top_k: int, config) -> list[UnifiedSearchResult]:
+    query_vector = np.array(await embed_text_fn(query), dtype=float)
+    visual = store.query_visual(query_vector, top_k=top_k)
+    transcripts = store.query_transcripts(query_vector, top_k=top_k)
+    return fuse_ranked_results(
+        visual_results=visual,
+        transcript_results=transcripts,
+        weights={'visual': config.visual_weight, 'transcript': config.transcript_weight},
+        rrf_k=config.rrf_k,
+    )[:top_k]
