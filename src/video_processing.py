@@ -48,7 +48,12 @@ def compute_video_id_from_bytes(video_bytes: bytes) -> str:
     return hashlib.sha1(video_bytes).hexdigest()
 
 
-def extract_sampled_frames(video_path: str, video_id: str, interval_sec: float) -> list[FrameRecord]:
+def extract_sampled_frames(
+    video_path: str,
+    video_id: str,
+    interval_sec: float,
+    timestamps: list[float] | None = None,
+) -> list[FrameRecord]:
     capture = cv2.VideoCapture(video_path)
     if not capture.isOpened():
         raise RuntimeError(f'Could not open video: {video_path}')
@@ -61,7 +66,7 @@ def extract_sampled_frames(video_path: str, video_id: str, interval_sec: float) 
         raise RuntimeError('Could not determine video duration from stream metadata.')
 
     duration_sec = frame_count / fps
-    timestamps = build_sample_timestamps(duration_sec, interval_sec)
+    timestamps = timestamps or build_sample_timestamps(duration_sec, interval_sec)
 
     records: list[FrameRecord] = []
     for index, timestamp in enumerate(timestamps):

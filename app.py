@@ -1,25 +1,24 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import tempfile
 from pathlib import Path
+from datetime import datetime, timezone
 
 import streamlit as st
 
+from src.app_state import ensure_defaults, set_playback_target
+from src.audio import transcribe_video
 from src.config import AppConfig
 from src.embeddings import GeminiEmbedder
 from src.index_store import ChromaIndexStore, HybridIndexStore, InMemoryIndexStore
-from src.pipeline import index_frames_into_store, search_frames
-from src.search import (
-    filter_results_by_similarity,
-    format_timestamp,
-    group_top_result_per_video,
-)
+from src.library import load_catalog, persist_video_bytes, save_catalog, upsert_video_metadata
+from src.models import VideoMetadata
+from src.pipeline import embed_transcripts_into_store, index_frames_into_store, search_library
+from src.scenes import select_visual_timestamps
+from src.ui import render_unified_results
 from src.video_processing import (
     compute_video_id_from_bytes,
     extract_sampled_frames,
-    persist_uploaded_video,
 )
 
 
@@ -41,38 +40,21 @@ def _get_runtime() -> tuple[AppConfig, GeminiEmbedder, HybridIndexStore]:
 
 
 def _ensure_session_defaults() -> None:
-    st.session_state.setdefault('active_video_path', None)
-    st.session_state.setdefault('active_video_id', None)
-    st.session_state.setdefault('active_video_name', None)
-    st.session_state.setdefault('video_name_by_id', {})
-    st.session_state.setdefault('video_path_by_id', {})
-    st.session_state.setdefault('search_results', [])
-    st.session_state.setdefault('last_index_failures', [])
-    st.session_state.setdefault('playback_video_id', None)
-    st.session_state.setdefault('playback_start_time', 0)
+    ensure_defaults(st.session_state)
 
 
-def _render_results() -> None:
-    results = st.session_state.get('search_results', [])
-    if not results:
-        return
-
-    st.subheader('Top Matches')
-    columns = st.columns(len(results))
-    for idx, result in enumerate(results):
-        with columns[idx]:
-            image_data = base64.b64decode(result.frame.thumbnail_b64)
-            st.image(image_data, use_container_width=True)
-            st.caption(
-                f"{format_timestamp(result.frame.timestamp_sec)} - {round(result.similarity * 100)}%"
-            )
-
-            names = st.session_state.get('video_name_by_id', {})
-            source = names.get(result.frame.video_id, result.frame.video_id[:8])
-            st.caption(f"source: {source}")
-            if st.button('Play', key=f"play_{result.frame.video_id}_{result.frame.frame_id}"):
-                st.session_state['playback_video_id'] = result.frame.video_id
-                st.session_state['playback_start_time'] = int(result.frame.timestamp_sec)
+def _video_metadata(video_id: str, name: str, path: Path, frames, chunks) -> VideoMetadata:
+    return VideoMetadata(
+        video_id=video_id,
+        name=name,
+        path=str(path),
+        duration_sec=max((frame.timestamp_sec for frame in frames), default=0.0),
+        fps=0.0,
+        frame_count=0,
+        indexed_at=datetime.now(timezone.utc).isoformat(),
+        visual_frame_count=len(frames),
+        transcript_chunk_count=len(chunks),
+    )
 
 
 def main() -> None:
@@ -89,6 +71,20 @@ def main() -> None:
         st.info('Set GEMINI_API_KEY in your local environment or .env file, then restart the app.')
         return
 
+    library_root = Path('.videosense')
+    catalog_path = library_root / 'library.json'
+    catalog = load_catalog(catalog_path)
+    for metadata in catalog.values():
+        st.session_state['video_name_by_id'][metadata.video_id] = metadata.name
+        st.session_state['video_path_by_id'][metadata.video_id] = metadata.path
+
+    with st.sidebar:
+        st.subheader('Search Controls')
+        top_k = st.slider('Results', min_value=1, max_value=12, value=config.top_k)
+        min_score = st.slider('Minimum score', min_value=0.0, max_value=1.0, value=config.min_similarity)
+        enable_transcripts = st.toggle('Transcript channel', value=True)
+        st.caption(f'{len(catalog)} indexed video(s)')
+
     uploaded_files = st.file_uploader(
         'Upload one or more videos',
         type=['mp4', 'mov', 'avi', 'mkv', 'webm'],
@@ -97,10 +93,13 @@ def main() -> None:
 
     if uploaded_files:
         if st.button('Index videos', type='primary'):
-            temp_root = Path(tempfile.gettempdir()) / 'videosense_uploads'
             for uploaded in uploaded_files:
                 video_bytes = bytes(uploaded.getbuffer())
-                video_path = persist_uploaded_video(uploaded_file=uploaded, base_dir=temp_root)
+                video_path = persist_video_bytes(
+                    video_bytes=video_bytes,
+                    original_name=uploaded.name,
+                    library_root=library_root,
+                )
                 video_id = compute_video_id_from_bytes(video_bytes)
 
                 st.session_state['active_video_path'] = str(video_path)
@@ -116,11 +115,21 @@ def main() -> None:
                     st.info(f'Reused index for {uploaded.name}.')
                     continue
 
-                with st.spinner(f'Extracting frames from {uploaded.name}...'):
+                with st.spinner(f'Extracting visual moments from {uploaded.name}...'):
+                    duration_placeholder = 0.0
+                    timestamps = select_visual_timestamps(
+                        video_path=str(video_path),
+                        duration_sec=duration_placeholder,
+                        strategy=config.frame_strategy,
+                        interval_sec=config.frame_interval_sec,
+                        threshold=config.scene_threshold,
+                        max_frames=config.max_visual_frames,
+                    )
                     frames = extract_sampled_frames(
                         video_path=str(video_path),
                         video_id=video_id,
                         interval_sec=config.frame_interval_sec,
+                        timestamps=timestamps,
                     )
 
                 progress = st.progress(0.0, text=f'Indexing {uploaded.name}...')
@@ -146,6 +155,25 @@ def main() -> None:
                 if failures:
                     st.warning(f'{uploaded.name}: failed frames {len(failures)}')
 
+                chunks = []
+                if enable_transcripts:
+                    try:
+                        with st.spinner(f'Transcribing {uploaded.name}...'):
+                            chunks = transcribe_video(video_path=video_path, video_id=video_id, library_root=library_root)
+                            awaitable = embed_transcripts_into_store(
+                                video_id=video_id,
+                                chunks=chunks,
+                                store=store,
+                                embed_text_fn=embedder.embed_text,
+                            )
+                            asyncio.run(awaitable)
+                    except Exception as exc:
+                        st.warning(f'{uploaded.name}: transcript indexing skipped ({exc})')
+
+                metadata = _video_metadata(video_id=video_id, name=uploaded.name, path=video_path, frames=indexed, chunks=chunks)
+                upsert_video_metadata(catalog, metadata)
+                save_catalog(catalog_path, catalog)
+
         playback_video_id = st.session_state.get('playback_video_id')
         video_path_by_id = st.session_state.get('video_path_by_id', {})
         if playback_video_id and playback_video_id in video_path_by_id:
@@ -156,30 +184,28 @@ def main() -> None:
             query = st.text_input('Search for a moment')
             if st.button('Search') and query.strip():
                 results = asyncio.run(
-                    search_frames(
+                    search_library(
                         query=query.strip(),
                         store=store,
                         embed_text_fn=embedder.embed_text,
-                        top_k=config.top_k,
+                        top_k=top_k,
+                        config=config,
                     )
                 )
-                filtered = filter_results_by_similarity(results, min_similarity=config.min_similarity)
+                filtered = [result for result in results if result.score >= min_score]
                 st.session_state['search_results'] = filtered
 
-                grouped = group_top_result_per_video(filtered)
-                if grouped:
-                    st.subheader('Best Match Per Video')
-                    for item in grouped:
-                        names = st.session_state.get('video_name_by_id', {})
-                        label = names.get(item.frame.video_id, item.frame.video_id[:8])
-                        st.write(
-                            f"{label}: {format_timestamp(item.frame.timestamp_sec)} ({round(item.similarity * 100)}%)"
-                        )
-                else:
+                if not filtered:
                     st.info(
-                        f'No strong matches found at the current similarity threshold ({config.min_similarity:.2f}).'
+                        f'No strong matches found at the current similarity threshold ({min_score:.2f}).'
                     )
-            _render_results()
+            selected = render_unified_results(
+                st=st,
+                results=st.session_state.get('search_results', []),
+                video_name_by_id=st.session_state.get('video_name_by_id', {}),
+            )
+            if selected:
+                set_playback_target(st.session_state, video_id=selected[0], start_time=selected[1])
 
 
 if __name__ == '__main__':
