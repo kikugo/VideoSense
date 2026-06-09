@@ -17,6 +17,9 @@ class AppConfig:
     embed_backoff_sec: float
     enable_persistence: bool
     persistence_dir: str
+    vector_backend: str
+    qdrant_url: str
+    qdrant_api_key: str
     min_similarity: float
     frame_strategy: str
     scene_threshold: float
@@ -40,6 +43,9 @@ class AppConfig:
             embed_backoff_sec=float(os.getenv('VIDEOSENSE_EMBED_BACKOFF_SEC', '1.0')),
             enable_persistence=os.getenv('VIDEOSENSE_ENABLE_PERSISTENCE', 'false').strip().lower() in {'1', 'true', 'yes'},
             persistence_dir=os.getenv('VIDEOSENSE_PERSISTENCE_DIR', '.videosense/chroma').strip(),
+            vector_backend=os.getenv('VIDEOSENSE_VECTOR_BACKEND', 'auto').strip(),
+            qdrant_url=os.getenv('VIDEOSENSE_QDRANT_URL', '').strip(),
+            qdrant_api_key=os.getenv('VIDEOSENSE_QDRANT_API_KEY', '').strip(),
             min_similarity=float(os.getenv('VIDEOSENSE_MIN_SIMILARITY', '0.3')),
             frame_strategy=os.getenv('VIDEOSENSE_FRAME_STRATEGY', 'scene').strip(),
             scene_threshold=float(os.getenv('VIDEOSENSE_SCENE_THRESHOLD', '27.0')),

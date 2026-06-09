@@ -44,6 +44,10 @@ class QdrantIndexStore(IndexStore):
         self._frames_collection = f'{collection_prefix}_frames'
         self._transcripts_collection = f'{collection_prefix}_transcripts'
 
+    def health_check(self) -> None:
+        """Raise if the Qdrant instance is unreachable (used for fallback)."""
+        self._client.get_collections()
+
     # ----- frames -----
 
     def save(self, video_id: str, frames: list[FrameRecord]) -> None:

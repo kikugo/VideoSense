@@ -10,7 +10,8 @@ from src.app_state import ensure_defaults, set_playback_target
 from src.audio import transcribe_video
 from src.config import AppConfig
 from src.embeddings import GeminiEmbedder
-from src.index_store import ChromaIndexStore, HybridIndexStore, InMemoryIndexStore
+from src.index_store import HybridIndexStore, InMemoryIndexStore
+from src.store_factory import build_persistent_store
 from src.library import load_catalog, persist_video_bytes, save_catalog, upsert_video_metadata
 from src.models import VideoMetadata
 from src.pipeline import embed_transcripts_into_store, index_frames_into_store, search_library
@@ -30,9 +31,7 @@ def _get_runtime() -> tuple[AppConfig, GeminiEmbedder, HybridIndexStore]:
     embedder = GeminiEmbedder(api_key=config.gemini_api_key, model=config.embedding_model)
 
     memory_store = InMemoryIndexStore()
-    persistent_store = None
-    if config.enable_persistence:
-        persistent_store = ChromaIndexStore(persist_directory=config.persistence_dir)
+    persistent_store = build_persistent_store(config)
 
     store = HybridIndexStore(memory_store=memory_store, persistent_store=persistent_store)
     st.session_state['runtime'] = (config, embedder, store)

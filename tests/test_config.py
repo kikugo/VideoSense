@@ -53,3 +53,27 @@ def test_app_config_defaults_without_env(monkeypatch):
     assert config.rrf_k == 60
     assert config.transcript_weight == 1.15
     assert config.visual_weight == 1.0
+
+
+def test_app_config_reads_qdrant_settings(monkeypatch):
+    monkeypatch.setenv('VIDEOSENSE_VECTOR_BACKEND', 'qdrant')
+    monkeypatch.setenv('VIDEOSENSE_QDRANT_URL', 'https://x.cloud.qdrant.io:6333')
+    monkeypatch.setenv('VIDEOSENSE_QDRANT_API_KEY', 'secret-key')
+
+    config = AppConfig.from_env()
+
+    assert config.vector_backend == 'qdrant'
+    assert config.qdrant_url == 'https://x.cloud.qdrant.io:6333'
+    assert config.qdrant_api_key == 'secret-key'
+
+
+def test_app_config_vector_backend_defaults_to_auto(monkeypatch):
+    monkeypatch.delenv('VIDEOSENSE_VECTOR_BACKEND', raising=False)
+    monkeypatch.delenv('VIDEOSENSE_QDRANT_URL', raising=False)
+    monkeypatch.delenv('VIDEOSENSE_QDRANT_API_KEY', raising=False)
+
+    config = AppConfig.from_env()
+
+    assert config.vector_backend == 'auto'
+    assert config.qdrant_url == ''
+    assert config.qdrant_api_key == ''
