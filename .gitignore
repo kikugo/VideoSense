@@ -12,3 +12,4 @@ __pycache__/
 .venv/
 *.pyc
 .videosense/
+.streamlit/secrets.toml

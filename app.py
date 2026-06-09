@@ -15,6 +15,7 @@ from src.store_factory import build_persistent_store
 from src.library import load_catalog, persist_video_bytes, save_catalog, upsert_video_metadata
 from src.models import VideoMetadata
 from src.pipeline import embed_transcripts_into_store, index_frames_into_store, search_library
+from src.runtime_env import load_streamlit_secrets_into_env
 from src.scenes import select_visual_timestamps
 from src.ui import render_unified_results
 from src.video_processing import (
@@ -27,6 +28,7 @@ def _get_runtime() -> tuple[AppConfig, GeminiEmbedder, HybridIndexStore]:
     if 'runtime' in st.session_state:
         return st.session_state['runtime']
 
+    load_streamlit_secrets_into_env()
     config = AppConfig.from_env()
     embedder = GeminiEmbedder(api_key=config.gemini_api_key, model=config.embedding_model)
 

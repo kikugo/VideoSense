@@ -39,6 +39,23 @@ For transcript indexing, install `ffmpeg` locally so VideoSense can extract audi
 .venv/bin/streamlit run app.py
 ```
 
+## Deploy (Streamlit Community Cloud)
+
+The app runs on [Streamlit Community Cloud](https://share.streamlit.io) — point
+it at this repo (`main`, main file `app.py`) and pick **Python 3.12** under
+*Advanced settings* (3.14 lacks wheels for some deps).
+
+- **System packages** come from `packages.txt` (`ffmpeg` for audio extraction,
+  `libgl1` for OpenCV). `requirements.txt` uses `opencv-python-headless` so
+  OpenCV runs on the headless server.
+- **Secrets**: add them in the app's *Settings → Secrets* editor using
+  `.streamlit/secrets.toml.example` as the template. `src/runtime_env.py`
+  bridges `st.secrets` into the environment that `AppConfig.from_env()` reads,
+  and real env vars always win over secrets so local runs are unaffected.
+- At minimum set `GEMINI_API_KEY`. For the production vector backend, also set
+  `VIDEOSENSE_QDRANT_URL` and `VIDEOSENSE_QDRANT_API_KEY`; without them the app
+  falls back to Chroma/in-memory automatically.
+
 ## Vector backends
 
 The persistent store is pluggable via `VIDEOSENSE_VECTOR_BACKEND`
