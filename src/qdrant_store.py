@@ -138,6 +138,13 @@ class QdrantIndexStore(IndexStore):
                 collection_name=name,
                 vectors_config=models.VectorParams(size=dim, distance=models.Distance.COSINE),
             )
+            # The real server (unlike local :memory: mode) requires a payload
+            # index before it will filter/delete by video_id.
+            self._client.create_payload_index(
+                collection_name=name,
+                field_name='video_id',
+                field_schema=models.PayloadSchemaType.KEYWORD,
+            )
 
     def _delete_by_video(self, name: str, video_id: str) -> None:
         from qdrant_client import models
