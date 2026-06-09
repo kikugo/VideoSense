@@ -3,6 +3,7 @@ opencv-python
 numpy
 google-genai
 chromadb
+qdrant-client
 python-dotenv
 pytest
 scenedetect
