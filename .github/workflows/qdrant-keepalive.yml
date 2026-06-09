@@ -1,0 +1,32 @@
+name: qdrant-keepalive
+
+# Free-tier Qdrant Cloud clusters are suspended after ~1 week of inactivity
+# (and deleted after ~4 weeks). This pings the cluster twice a week to keep it
+# warm so the live demo never lands on a suspended cluster.
+#
+# Requires two repo secrets:
+#   QDRANT_URL      - cluster URL including the port, e.g. https://xxx.cloud.qdrant.io:6333
+#   QDRANT_API_KEY  - the cluster API key
+#
+# Note: GitHub disables scheduled workflows after 60 days of no repo activity;
+# re-enable from the Actions tab if the repo goes quiet for that long.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1,4'  # Mondays and Thursdays at 06:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Qdrant /collections
+        run: |
+          if [ -z "${{ secrets.QDRANT_URL }}" ]; then
+            echo "QDRANT_URL secret not set; nothing to ping."
+            exit 0
+          fi
+          curl -sf -H "api-key: ${{ secrets.QDRANT_API_KEY }}" \
+            "${{ secrets.QDRANT_URL }}/collections" > /dev/null \
+            && echo "qdrant pinged successfully" \
+            || { echo "qdrant ping failed"; exit 1; }

@@ -1,0 +1,13 @@
+# Local Qdrant for development.
+# Start it with:  docker compose up -d qdrant
+# Then set in .env:
+#   VIDEOSENSE_VECTOR_BACKEND=qdrant
+#   VIDEOSENSE_QDRANT_URL=http://localhost:6333
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"  # REST / dashboard
+      - "6334:6334"  # gRPC
+    volumes:
+      - ./.videosense/qdrant:/qdrant/storage
