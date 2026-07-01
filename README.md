@@ -85,9 +85,10 @@ docker compose up -d qdrant
 
 1. Create a free cluster at https://cloud.qdrant.io and copy its URL + API key.
 2. Set `VIDEOSENSE_QDRANT_URL` and `VIDEOSENSE_QDRANT_API_KEY` in `.env`.
-3. Free clusters suspend after ~1 week idle. The `qdrant-keepalive` GitHub
-   Action pings the cluster twice a week — add repo secrets `QDRANT_URL` and
-   `QDRANT_API_KEY` to enable it.
+3. Free clusters suspend after about a week of no activity. The
+   `qdrant-keepalive` GitHub Action keeps one warm by writing and then deleting
+   a throwaway point twice a week (a read-only ping doesn't reset the idle
+   timer). Add repo secrets `QDRANT_URL` and `QDRANT_API_KEY` to enable it.
 
 ## Local Data
 
