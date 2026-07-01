@@ -1,11 +1,13 @@
 name: qdrant-keepalive
 
 # Free-tier Qdrant Cloud clusters are suspended after ~1 week of inactivity
-# (and deleted after ~4 weeks). This pings the cluster twice a week to keep it
-# warm so the live demo never lands on a suspended cluster.
+# (and deleted after ~4 weeks). A read-only ping is not enough to count as
+# activity, so this does a real write twice a week: it upserts and then deletes
+# a throwaway point in a tiny dedicated collection, keeping the cluster warm so
+# the live demo never lands on a suspended cluster.
 #
 # Requires two repo secrets:
-#   QDRANT_URL      - cluster URL including the port, e.g. https://xxx.cloud.qdrant.io:6333
+#   QDRANT_URL      - cluster URL, e.g. https://xxx.eu-central-1-0.aws.cloud.qdrant.io
 #   QDRANT_API_KEY  - the cluster API key
 #
 # Note: GitHub disables scheduled workflows after 60 days of no repo activity;
@@ -20,20 +22,63 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Qdrant /collections
+      - name: Keep Qdrant warm (write ping)
+        env:
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
         run: |
-          if [ -z "${{ secrets.QDRANT_URL }}" ]; then
+          set -uo pipefail
+          if [ -z "$QDRANT_URL" ]; then
             echo "QDRANT_URL secret not set; nothing to ping."
             exit 0
           fi
-          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
-            -H "api-key: ${{ secrets.QDRANT_API_KEY }}" \
-            "${{ secrets.QDRANT_URL }}/collections")
-          echo "HTTP $code"
-          case "$code" in
-            200) echo "qdrant pinged successfully" ;;
-            401|403) echo "auth failed - check/rotate QDRANT_API_KEY"; exit 1 ;;
-            404) echo "cluster not found - free-tier cluster likely deleted, recreate it and update QDRANT_URL/QDRANT_API_KEY"; exit 1 ;;
-            000) echo "no response - cluster suspended or unreachable"; exit 1 ;;
-            *)   echo "unexpected status"; exit 1 ;;
+
+          COLL="videosense_keepalive"
+
+          # req METHOD PATH [DATA] -> sets $CODE (http status) and $BODY (response)
+          req() {
+            local method="$1" path="$2" data="${3:-}"
+            local args=(-s -o /tmp/qd_body -w '%{http_code}' --max-time 20 \
+              -X "$method" \
+              -H "api-key: $QDRANT_API_KEY" \
+              -H "content-type: application/json")
+            [ -n "$data" ] && args+=(-d "$data")
+            CODE=$(curl "${args[@]}" "$QDRANT_URL$path")
+            BODY=$(cat /tmp/qd_body 2>/dev/null)
+          }
+
+          fail() { echo "keepalive failed: $1 (HTTP ${CODE:-?})"; echo "$BODY"; exit 1; }
+
+          # 1) reachability + auth
+          req GET "/collections"
+          echo "GET /collections -> HTTP $CODE"
+          case "$CODE" in
+            200) ;;
+            401|403) fail "auth - check/rotate QDRANT_API_KEY" ;;
+            404) fail "cluster not found - free-tier cluster likely suspended/deleted; resume it and update QDRANT_URL/QDRANT_API_KEY" ;;
+            000) fail "no response - cluster unreachable" ;;
+            *)   fail "unexpected status on /collections" ;;
           esac
+
+          # 2) ensure the tiny keepalive collection exists (1-dim vector is plenty)
+          req GET "/collections/$COLL"
+          if [ "$CODE" = "404" ]; then
+            req PUT "/collections/$COLL" '{"vectors":{"size":1,"distance":"Cosine"}}'
+            [ "$CODE" = "200" ] || fail "create $COLL"
+            echo "created collection $COLL"
+          elif [ "$CODE" != "200" ]; then
+            fail "check $COLL"
+          fi
+
+          # 3) the write that registers activity: upsert then delete a throwaway point
+          TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          req PUT "/collections/$COLL/points?wait=true" \
+            "{\"points\":[{\"id\":1,\"vector\":[0.1],\"payload\":{\"ts\":\"$TS\"}}]}"
+          [ "$CODE" = "200" ] || fail "upsert point"
+          echo "upserted keepalive point at $TS"
+
+          req POST "/collections/$COLL/points/delete?wait=true" '{"points":[1]}'
+          [ "$CODE" = "200" ] || fail "delete point"
+          echo "deleted keepalive point"
+
+          echo "qdrant kept warm (write ping ok)"
