@@ -26,7 +26,13 @@ jobs:
             echo "QDRANT_URL secret not set; nothing to ping."
             exit 0
           fi
-          curl -sf -H "api-key: ${{ secrets.QDRANT_API_KEY }}" \
-            "${{ secrets.QDRANT_URL }}/collections" > /dev/null \
-            && echo "qdrant pinged successfully" \
-            || { echo "qdrant ping failed"; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 \
+            -H "api-key: ${{ secrets.QDRANT_API_KEY }}" \
+            "${{ secrets.QDRANT_URL }}/collections")
+          echo "HTTP $code"
+          case "$code" in
+            200) echo "qdrant pinged successfully" ;;
+            401|403) echo "auth failed - check/rotate QDRANT_API_KEY"; exit 1 ;;
+            000) echo "no response - cluster suspended or deleted"; exit 1 ;;
+            *)   echo "unexpected status"; exit 1 ;;
+          esac
