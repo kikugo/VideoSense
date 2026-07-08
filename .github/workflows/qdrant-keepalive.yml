@@ -6,34 +6,52 @@ name: qdrant-keepalive
 # a throwaway point in a tiny dedicated collection, keeping the cluster warm so
 # the live demo never lands on a suspended cluster.
 #
+# On persistent failure (after one retry) it opens or updates a GitHub issue so
+# the failure is visible on the repo instead of buried in email.
+#
 # Requires two repo secrets:
 #   QDRANT_URL      - cluster URL, e.g. https://xxx.eu-central-1-0.aws.cloud.qdrant.io
 #   QDRANT_API_KEY  - the cluster API key
 #
 # Note: GitHub disables scheduled workflows after 60 days of no repo activity;
-# re-enable from the Actions tab if the repo goes quiet for that long.
+# the tests workflow re-enables this one on the next push.
 
 on:
   schedule:
     - cron: '0 6 * * 1,4'  # Mondays and Thursdays at 06:00 UTC
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      force_fail:
+        description: point the ping at an unreachable address to test failure handling
+        type: boolean
+        default: false
 
 jobs:
   ping:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
       - name: Keep Qdrant warm (write ping)
+        id: ping
         env:
           QDRANT_URL: ${{ secrets.QDRANT_URL }}
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          FORCE_FAIL: ${{ inputs.force_fail }}
         run: |
           set -uo pipefail
+          if [ "${FORCE_FAIL:-false}" = "true" ]; then
+            echo "force_fail set; pointing at an unreachable address"
+            QDRANT_URL="http://127.0.0.1:9"
+          fi
           if [ -z "$QDRANT_URL" ]; then
             echo "QDRANT_URL secret not set; nothing to ping."
             exit 0
           fi
 
           COLL="videosense_keepalive"
+          REASON=""
 
           # req METHOD PATH [DATA] -> sets $CODE (http status) and $BODY (response)
           req() {
@@ -50,38 +68,70 @@ jobs:
             BODY=$(cat /tmp/qd_body 2>/dev/null || true)
           }
 
-          fail() { echo "keepalive failed: $1 (HTTP ${CODE:-?})"; echo "$BODY"; exit 1; }
+          fail() {
+            REASON="$1 (HTTP ${CODE:-?})"
+            echo "keepalive failed: $REASON"
+            echo "$BODY"
+            return 1
+          }
 
-          # 1) reachability + auth
-          req GET "/collections"
-          echo "GET /collections -> HTTP $CODE"
-          case "$CODE" in
-            200) ;;
-            401|403) fail "auth - check/rotate QDRANT_API_KEY" ;;
-            404) fail "cluster not found - free-tier cluster likely suspended/deleted; resume it and update QDRANT_URL/QDRANT_API_KEY" ;;
-            000) fail "no response - cluster unreachable" ;;
-            *)   fail "unexpected status on /collections" ;;
-          esac
+          warm() {
+            req GET "/collections"
+            echo "GET /collections -> HTTP $CODE"
+            case "$CODE" in
+              200) ;;
+              401|403) fail "auth - check/rotate QDRANT_API_KEY"; return 1 ;;
+              404) fail "cluster not found - free-tier cluster likely suspended/deleted; resume it and update QDRANT_URL/QDRANT_API_KEY"; return 1 ;;
+              000) fail "no response - cluster unreachable"; return 1 ;;
+              *)   fail "unexpected status on /collections"; return 1 ;;
+            esac
 
-          # 2) ensure the tiny keepalive collection exists (1-dim vector is plenty)
-          req GET "/collections/$COLL"
-          if [ "$CODE" = "404" ]; then
-            req PUT "/collections/$COLL" '{"vectors":{"size":1,"distance":"Cosine"}}'
-            [ "$CODE" = "200" ] || fail "create $COLL"
-            echo "created collection $COLL"
-          elif [ "$CODE" != "200" ]; then
-            fail "check $COLL"
+            req GET "/collections/$COLL"
+            if [ "$CODE" = "404" ]; then
+              req PUT "/collections/$COLL" '{"vectors":{"size":1,"distance":"Cosine"}}'
+              [ "$CODE" = "200" ] || { fail "create $COLL"; return 1; }
+              echo "created collection $COLL"
+            elif [ "$CODE" != "200" ]; then
+              fail "check $COLL"; return 1
+            fi
+
+            local ts
+            ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            req PUT "/collections/$COLL/points?wait=true" \
+              "{\"points\":[{\"id\":1,\"vector\":[0.1],\"payload\":{\"ts\":\"$ts\"}}]}"
+            [ "$CODE" = "200" ] || { fail "upsert point"; return 1; }
+            echo "upserted keepalive point at $ts"
+
+            req POST "/collections/$COLL/points/delete?wait=true" '{"points":[1]}'
+            [ "$CODE" = "200" ] || { fail "delete point"; return 1; }
+            echo "deleted keepalive point"
+          }
+
+          if ! warm; then
+            echo "first attempt failed; retrying in 30s"
+            sleep 30
+            if ! warm; then
+              echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+              echo "qdrant keepalive failed twice: $REASON" >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
           fi
-
-          # 3) the write that registers activity: upsert then delete a throwaway point
-          TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          req PUT "/collections/$COLL/points?wait=true" \
-            "{\"points\":[{\"id\":1,\"vector\":[0.1],\"payload\":{\"ts\":\"$TS\"}}]}"
-          [ "$CODE" = "200" ] || fail "upsert point"
-          echo "upserted keepalive point at $TS"
-
-          req POST "/collections/$COLL/points/delete?wait=true" '{"points":[1]}'
-          [ "$CODE" = "200" ] || fail "delete point"
-          echo "deleted keepalive point"
-
           echo "qdrant kept warm (write ping ok)"
+
+      - name: Open or update the failure issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REASON: ${{ steps.ping.outputs.reason }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="qdrant keepalive failing"
+          body=$(printf 'Run: %s\nReason: %s' "$RUN_URL" "${REASON:-unknown}")
+          existing=$(gh issue list --state open --search "$title in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+            echo "commented on issue #$existing"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
