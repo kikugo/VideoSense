@@ -43,8 +43,11 @@ jobs:
               -H "api-key: $QDRANT_API_KEY" \
               -H "content-type: application/json")
             [ -n "$data" ] && args+=(-d "$data")
-            CODE=$(curl "${args[@]}" "$QDRANT_URL$path")
-            BODY=$(cat /tmp/qd_body 2>/dev/null)
+            rm -f /tmp/qd_body
+            # the step shell runs with -e, so a transport-level curl failure
+            # must not abort the script before the status handling runs
+            CODE=$(curl "${args[@]}" "$QDRANT_URL$path") || CODE="000"
+            BODY=$(cat /tmp/qd_body 2>/dev/null || true)
           }
 
           fail() { echo "keepalive failed: $1 (HTTP ${CODE:-?})"; echo "$BODY"; exit 1; }
