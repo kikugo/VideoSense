@@ -25,3 +25,25 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run tests
         run: pytest -q
+
+  # GitHub disables cron workflows after 60 quiet days; any push to main
+  # re-arms the keepalive so a break from the project can't kill it for good.
+  rearm-keepalive:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    continue-on-error: true
+    steps:
+      - name: Re-enable the keepalive cron if inactivity disabled it
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          wf="repos/${{ github.repository }}/actions/workflows/qdrant-keepalive.yml"
+          state=$(gh api "$wf" --jq .state)
+          if [ "$state" = "disabled_inactivity" ]; then
+            gh api --method PUT "$wf/enable"
+            echo "re-enabled the keepalive cron"
+          else
+            echo "keepalive workflow state: $state (no action)"
+          fi

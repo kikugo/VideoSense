@@ -1,5 +1,8 @@
 # VideoSense
 
+[![tests](https://github.com/kikugo/VideoSense/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/kikugo/VideoSense/actions/workflows/tests.yml)
+[![qdrant-keepalive](https://github.com/kikugo/VideoSense/actions/workflows/qdrant-keepalive.yml/badge.svg)](https://github.com/kikugo/VideoSense/actions/workflows/qdrant-keepalive.yml)
+
 VideoSense is a Python app for semantic video search.
 
 ## Features
@@ -89,6 +92,9 @@ docker compose up -d qdrant
    `qdrant-keepalive` GitHub Action keeps one warm by writing and then deleting
    a throwaway point twice a week (a read-only ping doesn't reset the idle
    timer). Add repo secrets `QDRANT_URL` and `QDRANT_API_KEY` to enable it.
+   If the ping keeps failing, the action opens a GitHub issue with the
+   diagnosis; a push to `main` re-enables the cron if GitHub disabled it
+   after a quiet spell.
 
 ## Local Data
 
