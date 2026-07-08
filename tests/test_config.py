@@ -1,4 +1,14 @@
+import pytest
+
+import src.config
 from src.config import AppConfig
+
+
+@pytest.fixture(autouse=True)
+def _ignore_local_dotenv(monkeypatch):
+    # these tests control the environment explicitly via monkeypatch; the
+    # developer's local .env must not leak into them through load_dotenv()
+    monkeypatch.setattr(src.config, 'load_dotenv', lambda: None)
 
 
 def test_app_config_reads_env_values(monkeypatch):
