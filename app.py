@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import streamlit as st
 
-from src.app_state import ensure_defaults, set_playback_target
+from src.app_state import demo_rejection_reason, ensure_defaults, set_playback_target
 from src.audio import transcribe_video
 from src.config import AppConfig
 from src.embeddings import GeminiEmbedder
@@ -96,6 +96,18 @@ def main() -> None:
         if st.button('Index videos', type='primary'):
             for uploaded in uploaded_files:
                 video_bytes = bytes(uploaded.getbuffer())
+
+                if config.demo_mode:
+                    rejection = demo_rejection_reason(
+                        indexed_count=len(st.session_state['video_name_by_id']),
+                        upload_bytes=len(video_bytes),
+                        max_videos=config.max_videos_per_session,
+                        max_upload_mb=config.max_upload_mb,
+                    )
+                    if rejection:
+                        st.warning(f'{uploaded.name}: {rejection}')
+                        continue
+
                 video_path = persist_video_bytes(
                     video_bytes=video_bytes,
                     original_name=uploaded.name,

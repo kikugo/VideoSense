@@ -28,6 +28,9 @@ class AppConfig:
     rrf_k: int
     transcript_weight: float
     visual_weight: float
+    demo_mode: bool
+    max_videos_per_session: int
+    max_upload_mb: int
 
     @classmethod
     def from_env(cls) -> 'AppConfig':
@@ -54,4 +57,10 @@ class AppConfig:
             rrf_k=int(os.getenv('VIDEOSENSE_RRF_K', '60')),
             transcript_weight=float(os.getenv('VIDEOSENSE_TRANSCRIPT_WEIGHT', '1.15')),
             visual_weight=float(os.getenv('VIDEOSENSE_VISUAL_WEIGHT', '1.0')),
+            # Public demo guards. Indexing is memory-heavy and the hosted demo runs
+            # on a shared 1 GB container, so one large upload can evict everyone.
+            # These cap the blast radius; they are off for a local run.
+            demo_mode=os.getenv('VIDEOSENSE_DEMO_MODE', 'false').strip().lower() in {'1', 'true', 'yes'},
+            max_videos_per_session=int(os.getenv('VIDEOSENSE_MAX_VIDEOS_PER_SESSION', '3')),
+            max_upload_mb=int(os.getenv('VIDEOSENSE_MAX_UPLOAD_MB', '200')),
         )

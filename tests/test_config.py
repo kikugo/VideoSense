@@ -77,6 +77,30 @@ def test_app_config_reads_qdrant_settings(monkeypatch):
     assert config.qdrant_api_key == 'secret-key'
 
 
+def test_app_config_reads_demo_settings(monkeypatch):
+    monkeypatch.setenv('VIDEOSENSE_DEMO_MODE', 'true')
+    monkeypatch.setenv('VIDEOSENSE_MAX_VIDEOS_PER_SESSION', '2')
+    monkeypatch.setenv('VIDEOSENSE_MAX_UPLOAD_MB', '150')
+
+    config = AppConfig.from_env()
+
+    assert config.demo_mode is True
+    assert config.max_videos_per_session == 2
+    assert config.max_upload_mb == 150
+
+
+def test_app_config_demo_mode_defaults_off(monkeypatch):
+    monkeypatch.delenv('VIDEOSENSE_DEMO_MODE', raising=False)
+    monkeypatch.delenv('VIDEOSENSE_MAX_VIDEOS_PER_SESSION', raising=False)
+    monkeypatch.delenv('VIDEOSENSE_MAX_UPLOAD_MB', raising=False)
+
+    config = AppConfig.from_env()
+
+    assert config.demo_mode is False
+    assert config.max_videos_per_session == 3
+    assert config.max_upload_mb == 200
+
+
 def test_app_config_vector_backend_defaults_to_auto(monkeypatch):
     monkeypatch.delenv('VIDEOSENSE_VECTOR_BACKEND', raising=False)
     monkeypatch.delenv('VIDEOSENSE_QDRANT_URL', raising=False)
