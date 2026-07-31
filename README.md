@@ -3,6 +3,8 @@
 [![tests](https://github.com/kikugo/VideoSense/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/kikugo/VideoSense/actions/workflows/tests.yml)
 [![qdrant-keepalive](https://github.com/kikugo/VideoSense/actions/workflows/qdrant-keepalive.yml/badge.svg)](https://github.com/kikugo/VideoSense/actions/workflows/qdrant-keepalive.yml)
 
+[Live demo](https://videosense.streamlit.app). Clone the repo to run it locally.
+
 VideoSense is a Python app for semantic video search.
 
 ## Features
