@@ -18,6 +18,21 @@ VideoSense is a Python app for semantic video search.
 - Filter weak matches with a configurable minimum similarity threshold.
 - Use scene-aware frame selection to reduce visual embedding waste.
 
+## Storage and the keepalive
+
+Qdrant Cloud is the primary index. Chroma is the fallback, and an in-memory store is
+the last resort, chosen at startup in `src/store_factory.py` by a health check.
+
+The free tier suspends a cluster after a period of inactivity, and a read-only health
+check does not reset that timer. A cluster here was suspended in June 2026 while every
+read ping came back green. A suspended cluster answers 404 on every path, so it also
+does not look like an outage.
+
+The fix is a scheduled write: a cron upserts and deletes a point twice a week, which
+does reset the timer. GitHub disables a cron after 60 days without repository
+activity, so a second job re-enables it. If the cluster is unreachable anyway, the app
+falls back to Chroma rather than failing.
+
 ## Local setup
 
 1. Create a virtual environment:
@@ -44,7 +59,7 @@ For transcript indexing, install `ffmpeg` locally so VideoSense can extract audi
 
 ## Deploy (Streamlit Community Cloud)
 
-The app runs on [Streamlit Community Cloud](https://share.streamlit.io) — point
+The app runs on [Streamlit Community Cloud](https://share.streamlit.io): point
 it at this repo (`main`, main file `app.py`) and pick **Python 3.12** under
 *Advanced settings* (3.14 lacks wheels for some deps).
 
@@ -55,7 +70,7 @@ it at this repo (`main`, main file `app.py`) and pick **Python 3.12** under
   `.streamlit/secrets.toml.example` as the template. `src/runtime_env.py`
   bridges `st.secrets` into the environment that `AppConfig.from_env()` reads,
   and real env vars always win over secrets so local runs are unaffected.
-- At minimum set `GEMINI_API_KEY`. For the production vector backend, also set
+- At minimum set `GEMINI_API_KEY`. For the persistent vector backend, also set
   `VIDEOSENSE_QDRANT_URL` and `VIDEOSENSE_QDRANT_API_KEY`; without them the app
   falls back to Chroma/in-memory automatically.
 
@@ -66,10 +81,10 @@ The persistent store is pluggable via `VIDEOSENSE_VECTOR_BACKEND`
 `IndexStore` interface, so the app-side hybrid (visual + transcript) fusion is
 unchanged:
 
-- **memory** — no persistence; the index lives only for the session.
-- **chroma** — local ChromaDB under `.videosense/chroma/` (set `VIDEOSENSE_ENABLE_PERSISTENCE=true`).
-- **qdrant** — Qdrant, local or cloud (set `VIDEOSENSE_QDRANT_URL`, plus `VIDEOSENSE_QDRANT_API_KEY` for Qdrant Cloud).
-- **auto** (default) — Qdrant when a URL is set and reachable, otherwise Chroma (if persistence is on), otherwise in-memory.
+- **memory**: no persistence; the index lives only for the session.
+- **chroma**: local ChromaDB under `.videosense/chroma/` (set `VIDEOSENSE_ENABLE_PERSISTENCE=true`).
+- **qdrant**: Qdrant, local or cloud (set `VIDEOSENSE_QDRANT_URL`, plus `VIDEOSENSE_QDRANT_API_KEY` for Qdrant Cloud).
+- **auto** (default): Qdrant when a URL is set and reachable, otherwise Chroma (if persistence is on), otherwise in-memory.
 
 If Qdrant is configured but unreachable (e.g. a suspended free-tier cluster),
 the app **falls back** to Chroma/in-memory via a startup health check, so it
