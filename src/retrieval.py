@@ -34,6 +34,7 @@ def fuse_ranked_results(
             end_sec=result.frame.timestamp_sec,
             score=score,
             channel='visual',
+            similarity=result.similarity,
             frame=result.frame,
         )
 
@@ -46,6 +47,8 @@ def fuse_ranked_results(
             current.channel = 'both'
             current.transcript = result.chunk
             current.end_sec = max(current.end_sec, result.chunk.end_sec)
+            # A moment matched by both channels keeps the stronger evidence.
+            current.similarity = max(current.similarity, result.similarity)
         else:
             fused[key] = UnifiedSearchResult(
                 video_id=result.chunk.video_id,
@@ -53,6 +56,7 @@ def fuse_ranked_results(
                 end_sec=result.chunk.end_sec,
                 score=score,
                 channel='transcript',
+                similarity=result.similarity,
                 transcript=result.chunk,
             )
 

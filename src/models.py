@@ -55,5 +55,10 @@ class UnifiedSearchResult:
     end_sec: float
     score: float
     channel: str
+    # `score` is an RRF rank score (roughly 0.016-0.033 at rrf_k=60) and is only
+    # meaningful for ordering. `similarity` is the best raw cosine among the
+    # channels that matched, which is what a 0-1 threshold can be compared to.
+    # Filtering on `score` silently discarded every result.
+    similarity: float = 0.0
     frame: Optional[FrameRecord] = None
     transcript: Optional[TranscriptChunk] = None

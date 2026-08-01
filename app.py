@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -58,6 +59,21 @@ def _video_metadata(video_id: str, name: str, path: Path, frames, chunks) -> Vid
     )
 
 
+SAMPLE_DIR = Path('examples/sample')
+SAMPLE_MANIFEST = SAMPLE_DIR / 'manifest.json'
+
+
+def load_sample_manifest() -> dict | None:
+    """Describe the bundled clip, or None when it is not present in the checkout."""
+    try:
+        manifest = json.loads(SAMPLE_MANIFEST.read_text(encoding='utf-8'))
+    except Exception:
+        return None
+    if not (SAMPLE_DIR / manifest.get('file', '')).exists():
+        return None
+    return manifest
+
+
 def main() -> None:
     st.set_page_config(page_title='VideoSense', page_icon='🎬', layout='wide')
     st.title('VideoSense')
@@ -92,133 +108,172 @@ def main() -> None:
         accept_multiple_files=True,
     )
 
-    if uploaded_files:
-        if st.button('Index videos', type='primary'):
-            for uploaded in uploaded_files:
-                video_bytes = bytes(uploaded.getbuffer())
+    def index_one_video(video_bytes: bytes, name: str, enforce_demo_caps: bool = True) -> None:
+        """Persist, index and register a single video.
 
-                if config.demo_mode:
-                    rejection = demo_rejection_reason(
-                        indexed_count=len(st.session_state['video_name_by_id']),
-                        upload_bytes=len(video_bytes),
-                        max_videos=config.max_videos_per_session,
-                        max_upload_mb=config.max_upload_mb,
-                    )
-                    if rejection:
-                        st.warning(f'{uploaded.name}: {rejection}')
-                        continue
-
-                video_path = persist_video_bytes(
-                    video_bytes=video_bytes,
-                    original_name=uploaded.name,
-                    library_root=library_root,
-                )
-                video_id = compute_video_id_from_bytes(video_bytes)
-
-                st.session_state['active_video_path'] = str(video_path)
-                st.session_state['active_video_id'] = video_id
-                st.session_state['active_video_name'] = uploaded.name
-                st.session_state['video_name_by_id'][video_id] = uploaded.name
-                st.session_state['video_path_by_id'][video_id] = str(video_path)
-                st.session_state['playback_video_id'] = video_id
-                st.session_state['playback_start_time'] = 0
-
-                cached = store.load(video_id)
-                if cached:
-                    st.info(f'Reused index for {uploaded.name}.')
-                    continue
-
-                with st.spinner(f'Extracting visual moments from {uploaded.name}...'):
-                    duration_placeholder = 0.0
-                    timestamps = select_visual_timestamps(
-                        video_path=str(video_path),
-                        duration_sec=duration_placeholder,
-                        strategy=config.frame_strategy,
-                        interval_sec=config.frame_interval_sec,
-                        threshold=config.scene_threshold,
-                        max_frames=config.max_visual_frames,
-                    )
-                    frames = extract_sampled_frames(
-                        video_path=str(video_path),
-                        video_id=video_id,
-                        interval_sec=config.frame_interval_sec,
-                        timestamps=timestamps,
-                    )
-
-                progress = st.progress(0.0, text=f'Indexing {uploaded.name}...')
-
-                def _on_progress(done: int, total: int) -> None:
-                    ratio = done / max(1, total)
-                    progress.progress(ratio, text=f'Indexing {uploaded.name}... {done}/{total}')
-
-                indexed, failures = asyncio.run(
-                    index_frames_into_store(
-                        video_id=video_id,
-                        frames=frames,
-                        store=store,
-                        embed_image_fn=embedder.embed_image_base64,
-                        concurrency=config.embed_concurrency,
-                        max_retries=config.embed_max_retries,
-                        base_backoff_sec=config.embed_backoff_sec,
-                        on_progress=_on_progress,
-                    )
-                )
-                st.session_state['last_index_failures'] = failures
-                st.success(f'{uploaded.name}: indexed {len(indexed) - len(failures)} frame(s).')
-                if failures:
-                    st.warning(f'{uploaded.name}: failed frames {len(failures)}')
-
-                chunks = []
-                if enable_transcripts:
-                    try:
-                        with st.spinner(f'Transcribing {uploaded.name}...'):
-                            chunks = transcribe_video(video_path=video_path, video_id=video_id, library_root=library_root)
-                            awaitable = embed_transcripts_into_store(
-                                video_id=video_id,
-                                chunks=chunks,
-                                store=store,
-                                embed_text_fn=embedder.embed_text,
-                            )
-                            asyncio.run(awaitable)
-                    except Exception as exc:
-                        st.warning(f'{uploaded.name}: transcript indexing skipped ({exc})')
-
-                metadata = _video_metadata(video_id=video_id, name=uploaded.name, path=video_path, frames=indexed, chunks=chunks)
-                upsert_video_metadata(catalog, metadata)
-                save_catalog(catalog_path, catalog)
-
-        playback_video_id = st.session_state.get('playback_video_id')
-        video_path_by_id = st.session_state.get('video_path_by_id', {})
-        if playback_video_id and playback_video_id in video_path_by_id:
-            playback_path = video_path_by_id[playback_video_id]
-            video_bytes = Path(playback_path).read_bytes()
-            st.video(video_bytes, start_time=int(st.session_state.get('playback_start_time', 0)))
-
-            query = st.text_input('Search for a moment')
-            if st.button('Search') and query.strip():
-                results = asyncio.run(
-                    search_library(
-                        query=query.strip(),
-                        store=store,
-                        embed_text_fn=embedder.embed_text,
-                        top_k=top_k,
-                        config=config,
-                    )
-                )
-                filtered = [result for result in results if result.score >= min_score]
-                st.session_state['search_results'] = filtered
-
-                if not filtered:
-                    st.info(
-                        f'No strong matches found at the current similarity threshold ({min_score:.2f}).'
-                    )
-            selected = render_unified_results(
-                st=st,
-                results=st.session_state.get('search_results', []),
-                video_name_by_id=st.session_state.get('video_name_by_id', {}),
+        Shared by the uploader and the bundled sample so the sample exercises the
+        real pipeline rather than a parallel shortcut that could rot unnoticed.
+        """
+        if config.demo_mode and enforce_demo_caps:
+            rejection = demo_rejection_reason(
+                indexed_count=len(st.session_state['video_name_by_id']),
+                upload_bytes=len(video_bytes),
+                max_videos=config.max_videos_per_session,
+                max_upload_mb=config.max_upload_mb,
             )
-            if selected:
-                set_playback_target(st.session_state, video_id=selected[0], start_time=selected[1])
+            if rejection:
+                st.warning(f'{name}: {rejection}')
+                return
+
+        video_path = persist_video_bytes(
+            video_bytes=video_bytes,
+            original_name=name,
+            library_root=library_root,
+        )
+        video_id = compute_video_id_from_bytes(video_bytes)
+
+        st.session_state['active_video_path'] = str(video_path)
+        st.session_state['active_video_id'] = video_id
+        st.session_state['active_video_name'] = name
+        st.session_state['video_name_by_id'][video_id] = name
+        st.session_state['video_path_by_id'][video_id] = str(video_path)
+        st.session_state['playback_video_id'] = video_id
+        st.session_state['playback_start_time'] = 0
+
+        # A persistent backend (Qdrant) outlives the container, so a sample that
+        # was indexed by an earlier visitor costs nothing to bring back.
+        cached = store.load(video_id)
+        if cached:
+            if video_id not in catalog:
+                upsert_video_metadata(
+                    catalog,
+                    _video_metadata(video_id=video_id, name=name, path=video_path, frames=[], chunks=[]),
+                )
+                save_catalog(catalog_path, catalog)
+            st.info(f'Reused the existing index for {name}.')
+            return
+
+        with st.spinner(f'Extracting visual moments from {name}...'):
+            timestamps = select_visual_timestamps(
+                video_path=str(video_path),
+                duration_sec=0.0,
+                strategy=config.frame_strategy,
+                interval_sec=config.frame_interval_sec,
+                threshold=config.scene_threshold,
+                max_frames=config.max_visual_frames,
+            )
+            frames = extract_sampled_frames(
+                video_path=str(video_path),
+                video_id=video_id,
+                interval_sec=config.frame_interval_sec,
+                timestamps=timestamps,
+            )
+
+        progress = st.progress(0.0, text=f'Indexing {name}...')
+
+        def _on_progress(done: int, total: int) -> None:
+            progress.progress(done / max(1, total), text=f'Indexing {name}... {done}/{total}')
+
+        indexed, failures = asyncio.run(
+            index_frames_into_store(
+                video_id=video_id,
+                frames=frames,
+                store=store,
+                embed_image_fn=embedder.embed_image_base64,
+                concurrency=config.embed_concurrency,
+                max_retries=config.embed_max_retries,
+                base_backoff_sec=config.embed_backoff_sec,
+                on_progress=_on_progress,
+            )
+        )
+        st.session_state['last_index_failures'] = failures
+        st.success(f'{name}: indexed {len(indexed) - len(failures)} frame(s).')
+        if failures:
+            st.warning(f'{name}: failed frames {len(failures)}')
+
+        chunks = []
+        if enable_transcripts:
+            try:
+                with st.spinner(f'Transcribing {name}...'):
+                    chunks = transcribe_video(video_path=video_path, video_id=video_id, library_root=library_root)
+                    asyncio.run(
+                        embed_transcripts_into_store(
+                            video_id=video_id,
+                            chunks=chunks,
+                            store=store,
+                            embed_text_fn=embedder.embed_text,
+                        )
+                    )
+            except Exception as exc:
+                st.warning(f'{name}: transcript indexing skipped ({exc})')
+
+        metadata = _video_metadata(video_id=video_id, name=name, path=video_path, frames=indexed, chunks=chunks)
+        upsert_video_metadata(catalog, metadata)
+        save_catalog(catalog_path, catalog)
+
+    if uploaded_files and st.button('Index videos', type='primary'):
+        for uploaded in uploaded_files:
+            index_one_video(bytes(uploaded.getbuffer()), uploaded.name)
+
+    # Offer the bundled clip whenever nothing is playable yet, so a first-time
+    # visitor has something to search without finding a video of their own.
+    sample = load_sample_manifest()
+    if sample and not st.session_state.get('playback_video_id'):
+        st.caption(
+            f"No video yet. Try the sample: **{sample['display_name']}** "
+            f"({sample['credit']}, {sample['source']})."
+        )
+        if st.button('🎬 Load sample video', type='primary'):
+            sample_path = SAMPLE_DIR / sample['file']
+            index_one_video(
+                sample_path.read_bytes(),
+                sample['display_name'],
+                enforce_demo_caps=False,
+            )
+            st.rerun()
+
+    # Search stays available whenever something is playable. It used to be nested
+    # under `if uploaded_files:`, so a visitor who reloaded the page lost the
+    # search box entirely even with an indexed library.
+    playback_video_id = st.session_state.get('playback_video_id')
+    video_path_by_id = st.session_state.get('video_path_by_id', {})
+    if playback_video_id and playback_video_id in video_path_by_id:
+        playback_path = video_path_by_id[playback_video_id]
+        if not Path(playback_path).exists():
+            st.warning('The indexed video file is missing from this container. Re-index it to play clips.')
+        else:
+            st.video(Path(playback_path).read_bytes(), start_time=int(st.session_state.get('playback_start_time', 0)))
+
+        if sample and playback_video_id == st.session_state.get('active_video_id'):
+            st.caption('Try asking: ' + ' · '.join(f'“{q}”' for q in sample.get('try_asking', [])[:3]))
+
+        query = st.text_input('Search for a moment')
+        if st.button('Search') and query.strip():
+            results = asyncio.run(
+                search_library(
+                    query=query.strip(),
+                    store=store,
+                    embed_text_fn=embedder.embed_text,
+                    top_k=top_k,
+                    config=config,
+                )
+            )
+            # Filter on the raw cosine, not the RRF rank score: RRF tops out
+            # near 0.03, so any threshold above that dropped every result.
+            filtered = [result for result in results if result.similarity >= min_score]
+            st.session_state['search_results'] = filtered
+
+            if not filtered:
+                st.info(
+                    f'No strong matches found at the current similarity threshold ({min_score:.2f}).'
+                )
+        selected = render_unified_results(
+            st=st,
+            results=st.session_state.get('search_results', []),
+            video_name_by_id=st.session_state.get('video_name_by_id', {}),
+        )
+        if selected:
+            set_playback_target(st.session_state, video_id=selected[0], start_time=selected[1])
 
 
 if __name__ == '__main__':

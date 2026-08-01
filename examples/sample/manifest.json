@@ -1,0 +1,18 @@
+{
+  "file": "artemis-i-recap.mp4",
+  "display_name": "Artemis I Launches to the Moon (NASA Recap)",
+  "duration_sec": 151.6,
+  "resolution": "640x360",
+  "source": "NASA Image and Video Library",
+  "source_url": "https://images.nasa.gov/details/Artemis%20I%20Launches%20to%20the%20Moon%20(Official%20NASA%20Recap)",
+  "credit": "NASA",
+  "license": "Public domain. NASA media is generally not copyrighted and may be reused; NASA does not endorse this project.",
+  "why_this_clip": "It has narration for the transcript channel and visually distinct scenes, so visual and transcript search return genuinely different things instead of both matching the same shot.",
+  "try_asking": [
+    "rocket on the launch pad",
+    "mission control room",
+    "someone speaking at a podium",
+    "the moment of liftoff"
+  ],
+  "processing": "Re-encoded from the NASA ~small.mp4 to 640x360 H.264 CRF 30 with 64 kbps mono AAC, to keep the repo small while leaving the audio track intact for transcription."
+}
