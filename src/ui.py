@@ -24,7 +24,9 @@ def render_unified_results(st: Any, results: list[UnifiedSearchResult], video_na
 
             source = video_name_by_id.get(result.video_id, result.video_id[:8])
             st.caption(
-                f"{format_timestamp(result.start_sec)} - {result.channel} match - {round(result.score * 100)}%"
+                # Show the cosine similarity, not the RRF rank score: RRF sits
+                # near 0.02 regardless of match quality, so every hit read "2%".
+                f"{format_timestamp(result.start_sec)} - {result.channel} match - {round(result.similarity * 100)}%"
             )
             st.caption(f"source: {source}")
             if st.button('Play', key=f"play_{result.video_id}_{idx}_{int(result.start_sec)}"):
