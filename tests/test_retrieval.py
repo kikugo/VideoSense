@@ -3,7 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from src.models import FrameRecord, SearchResult, TranscriptChunk, TranscriptSearchResult, match_strength
-from src.retrieval import dedupe_by_time_bucket, fuse_ranked_results
+from src.retrieval import (
+    dedupe_by_time_bucket,
+    fuse_ranked_results,
+    select_with_modality_coverage,
+)
 
 
 @dataclass
@@ -98,6 +102,89 @@ def test_fused_similarity_takes_the_stronger_channel_when_both_match():
 
     assert fused[0].channel == 'both'
     assert fused[0].similarity == 0.75
+
+
+def test_frame_merges_with_the_transcript_chunk_spoken_over_it():
+    """A frame at 42s and the chunk covering 38-48s are one moment, not two.
+
+    Frames bucket per second, chunks run about ten seconds, so before span-aware
+    merging these landed in different buckets and competed for a slot instead of
+    producing a single result carrying both a thumbnail and the spoken line.
+    """
+    visual = [SearchResult(FrameRecord('v1', 'f1', 42.1, 'thumb', [1.0]), 0.46)]
+    transcripts = [
+        TranscriptSearchResult(TranscriptChunk('v1', 't1', 38.0, 48.0, 'spoken', [1.0]), 0.62)
+    ]
+
+    fused = fuse_ranked_results(
+        visual_results=visual,
+        transcript_results=transcripts,
+        weights={'visual': 1.0, 'transcript': 1.15},
+        rrf_k=60,
+    )
+
+    assert len(fused) == 1
+    assert fused[0].channel == 'both'
+    assert fused[0].frame is not None
+    assert fused[0].transcript is not None
+    assert fused[0].similarity == 0.62
+
+
+def test_transcripts_cannot_shut_visuals_out_of_the_results():
+    """With transcript_weight > visual_weight the worst transcript outranks the
+    best frame (1.15/63 > 1.0/61), so the top-k was always entirely transcript.
+    """
+    visual = [
+        SearchResult(FrameRecord('v1', f'f{i}', 100.0 + i, 'thumb', [1.0]), 0.45)
+        for i in range(3)
+    ]
+    transcripts = [
+        TranscriptSearchResult(TranscriptChunk('v1', f't{i}', i * 10.0, i * 10.0 + 5.0, 'spoken', [1.0]), 0.60)
+        for i in range(3)
+    ]
+
+    fused = fuse_ranked_results(
+        visual_results=visual,
+        transcript_results=transcripts,
+        weights={'visual': 1.0, 'transcript': 1.15},
+        rrf_k=60,
+    )
+    assert all(item.frame is None for item in fused[:3]), 'precondition: transcripts block'
+
+    covered = select_with_modality_coverage(fused, 3)
+
+    assert len(covered) == 3
+    assert any(item.frame is not None for item in covered), 'a visual hit must survive'
+    assert covered[0] is fused[0], 'the top result keeps its rank'
+
+
+def test_modality_coverage_leaves_already_mixed_results_alone():
+    visual = [SearchResult(FrameRecord('v1', 'f1', 42.1, 'thumb', [1.0]), 0.46)]
+    transcripts = [
+        TranscriptSearchResult(TranscriptChunk('v1', 't1', 38.0, 48.0, 'spoken', [1.0]), 0.62)
+    ]
+    fused = fuse_ranked_results(
+        visual_results=visual, transcript_results=transcripts,
+        weights={'visual': 1.0, 'transcript': 1.15}, rrf_k=60,
+    )
+
+    assert select_with_modality_coverage(fused, 3) == fused
+
+
+def test_modality_coverage_is_a_noop_when_nothing_visual_matched():
+    transcripts = [
+        TranscriptSearchResult(TranscriptChunk('v1', f't{i}', i * 10.0, i * 10.0 + 5.0, 'spoken', [1.0]), 0.6)
+        for i in range(4)
+    ]
+    fused = fuse_ranked_results(
+        visual_results=[], transcript_results=transcripts,
+        weights={'visual': 1.0, 'transcript': 1.15}, rrf_k=60,
+    )
+
+    covered = select_with_modality_coverage(fused, 3)
+
+    assert len(covered) == 3
+    assert all(item.frame is None for item in covered)
 
 
 def test_dedupe_by_time_bucket_keeps_best_score():
