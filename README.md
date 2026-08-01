@@ -28,6 +28,14 @@ Ranking fuses the visual and transcript channels with Reciprocal Rank Fusion. RR
 The UI was filtering on that fused score against the "Minimum score" slider, which defaults to **0.30**. Nothing can clear 0.30 on a scale that tops out near 0.03, so **every search returned "No strong matches found"** while retrieval underneath was working fine: raw cosine similarities for the same queries ran 0.33–0.73. The displayed match strength had the same problem and read "2%" for every hit.
 
 The fix keeps RRF for ordering but carries the best raw cosine through fusion as a separate `similarity` field, and filters and displays on that. Two regression tests pin it, and both fail if the plumbing is removed.
+
+### The same weighting hid the visual results entirely
+
+Once search returned anything, every hit was a transcript hit — on a tool whose headline is *visual* search. Two causes, both structural rather than bad luck with the data:
+
+**Frames never merged with the words spoken over them.** Fusion bucketed by whole seconds, but transcript chunks run about ten seconds. A frame at 42.1s bucketed to `42` while the chunk covering 38–48s bucketed to `38`, so the same moment arrived as two entries competing for one slot, and `channel='both'` almost never happened. Fusion now looks for a frame inside a chunk's span and merges them, so a result carries the thumbnail *and* the line being spoken.
+
+**The channel weights guaranteed a shut-out.** RRF scores are rank-based, so with `transcript_weight=1.15` against `visual_weight=1.0` the worst transcript beat the best frame: `1.15/63 > 1.0/61`. Whenever the transcript channel returned enough hits the top-k was *always* entirely transcript, for any data. `select_with_modality_coverage` now promotes the highest-ranked visual hit into the last slot when the selection has no frame in it, leaving the rest of the ranking untouched. Each channel is also queried for a wider candidate pool than gets displayed, so fusion has something to work with.
 - Use scene-aware frame selection to reduce visual embedding waste.
 
 ## Storage and the keepalive
