@@ -3,9 +3,11 @@
 [![tests](https://github.com/kikugo/VideoSense/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/kikugo/VideoSense/actions/workflows/tests.yml)
 [![qdrant-keepalive](https://github.com/kikugo/VideoSense/actions/workflows/qdrant-keepalive.yml/badge.svg)](https://github.com/kikugo/VideoSense/actions/workflows/qdrant-keepalive.yml)
 
-[Live demo](https://videosense.streamlit.app). Clone the repo to run it locally.
+[Live demo](https://videosense.streamlit.app) — hit **Load sample video** and search it. No upload or signup needed.
 
 VideoSense is a Python app for semantic video search.
+
+The bundled clip is NASA's Artemis I recap (public domain, `examples/sample/`). It was chosen because it has narration for the transcript channel and visually distinct scenes, so "rocket on the launch pad", "mission control room" and "someone speaking at a podium" return genuinely different moments rather than three views of the same shot. Because the vector backend persists, the first visitor to load it pays the indexing cost and everyone after reuses the index by content hash.
 
 ## Features
 
@@ -18,6 +20,14 @@ VideoSense is a Python app for semantic video search.
 - Reuse previously indexed videos via content-based identity.
 - See best match per video for broad library queries.
 - Filter weak matches with a configurable minimum similarity threshold.
+
+## A bug worth writing down
+
+Ranking fuses the visual and transcript channels with Reciprocal Rank Fusion. RRF scores are rank-based, so at `rrf_k=60` they sit around 0.016–0.033 no matter how good the match is — they order results, they do not measure them.
+
+The UI was filtering on that fused score against the "Minimum score" slider, which defaults to **0.30**. Nothing can clear 0.30 on a scale that tops out near 0.03, so **every search returned "No strong matches found"** while retrieval underneath was working fine: raw cosine similarities for the same queries ran 0.33–0.73. The displayed match strength had the same problem and read "2%" for every hit.
+
+The fix keeps RRF for ordering but carries the best raw cosine through fusion as a separate `similarity` field, and filters and displays on that. Two regression tests pin it, and both fail if the plumbing is removed.
 - Use scene-aware frame selection to reduce visual embedding waste.
 
 ## Storage and the keepalive
