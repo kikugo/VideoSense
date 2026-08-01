@@ -14,7 +14,7 @@ from src.embeddings import GeminiEmbedder
 from src.index_store import HybridIndexStore, InMemoryIndexStore
 from src.store_factory import build_persistent_store
 from src.library import load_catalog, persist_video_bytes, save_catalog, upsert_video_metadata
-from src.models import VideoMetadata
+from src.models import VideoMetadata, match_strength
 from src.pipeline import embed_transcripts_into_store, index_frames_into_store, search_library
 from src.runtime_env import load_streamlit_secrets_into_env
 from src.scenes import select_visual_timestamps
@@ -260,7 +260,12 @@ def main() -> None:
             )
             # Filter on the raw cosine, not the RRF rank score: RRF tops out
             # near 0.03, so any threshold above that dropped every result.
-            filtered = [result for result in results if result.similarity >= min_score]
+            # Unknown strength keeps the result rather than dropping it.
+            filtered = [
+                result
+                for result in results
+                if (strength := match_strength(result)) is None or strength >= min_score
+            ]
             st.session_state['search_results'] = filtered
 
             if not filtered:

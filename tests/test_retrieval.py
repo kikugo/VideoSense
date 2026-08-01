@@ -1,7 +1,37 @@
 from __future__ import annotations
 
-from src.models import FrameRecord, SearchResult, TranscriptChunk, TranscriptSearchResult
+from dataclasses import dataclass
+
+from src.models import FrameRecord, SearchResult, TranscriptChunk, TranscriptSearchResult, match_strength
 from src.retrieval import dedupe_by_time_bucket, fuse_ranked_results
+
+
+@dataclass
+class _StaleResult:
+    """Mimics a result built by an older src package that predates `similarity`."""
+
+    video_id: str
+    score: float
+
+
+def test_match_strength_reports_unknown_rather_than_zero_for_stale_objects():
+    """A stale deploy must not be indistinguishable from a zero-similarity match.
+
+    Streamlit can run a new app.py against an already-imported older src package.
+    Returning 0.0 here would filter every result out, which looks exactly like the
+    bug this field was added to fix; None lets callers keep the result instead.
+    """
+    assert match_strength(_StaleResult(video_id='v1', score=0.019)) is None
+
+
+def test_match_strength_reads_similarity_when_present():
+    visual = [SearchResult(FrameRecord('v1', 'f1', 10.0, 'thumb', [1.0]), 0.42)]
+
+    fused = fuse_ranked_results(
+        visual_results=visual, transcript_results=[], weights={'visual': 1.0}, rrf_k=60
+    )
+
+    assert match_strength(fused[0]) == 0.42
 
 
 def test_fuse_ranked_results_merges_visual_and_transcript_hits():

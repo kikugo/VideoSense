@@ -62,3 +62,19 @@ class UnifiedSearchResult:
     similarity: float = 0.0
     frame: Optional[FrameRecord] = None
     transcript: Optional[TranscriptChunk] = None
+
+
+def match_strength(result: 'UnifiedSearchResult') -> Optional[float]:
+    """Raw cosine for a result, or None when it cannot be determined.
+
+    Read defensively. Streamlit re-executes the entry script from disk on every
+    rerun but leaves already-imported modules in ``sys.modules``, so a deploy can
+    run a new ``app.py`` against a stale ``src`` package until the process
+    restarts. That combination made this attribute missing and took the whole
+    page down with an AttributeError.
+
+    None means "unknown", not "zero". Callers must keep a result whose strength
+    is unknown rather than filtering it out, because dropping everything looks
+    identical to the no-results bug this field exists to fix.
+    """
+    return getattr(result, 'similarity', None)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 from typing import Any
 
-from src.models import UnifiedSearchResult
+from src.models import UnifiedSearchResult, match_strength
 from src.search import format_timestamp
 
 
@@ -23,11 +23,14 @@ def render_unified_results(st: Any, results: list[UnifiedSearchResult], video_na
                 st.caption(result.transcript.text)
 
             source = video_name_by_id.get(result.video_id, result.video_id[:8])
-            st.caption(
-                # Show the cosine similarity, not the RRF rank score: RRF sits
-                # near 0.02 regardless of match quality, so every hit read "2%".
-                f"{format_timestamp(result.start_sec)} - {result.channel} match - {round(result.similarity * 100)}%"
-            )
+            # Show the cosine similarity, not the RRF rank score: RRF sits near
+            # 0.02 regardless of match quality, so every hit read "2%". Omit the
+            # figure entirely rather than invent one when it is unavailable.
+            strength = match_strength(result)
+            label = f"{format_timestamp(result.start_sec)} - {result.channel} match"
+            if strength is not None:
+                label += f" - {round(strength * 100)}%"
+            st.caption(label)
             st.caption(f"source: {source}")
             if st.button('Play', key=f"play_{result.video_id}_{idx}_{int(result.start_sec)}"):
                 selected = (result.video_id, int(result.start_sec))
